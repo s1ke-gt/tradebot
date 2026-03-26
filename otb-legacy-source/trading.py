@@ -238,7 +238,8 @@ def get_inventory(user_id):
         data = None
 
         for i in range(5):  # Up to 5 attempts
-            url = f"https://trades.roblox.com/v2/users/{user_id}/tradableItems?sortBy=CreationTime&sortOrder=2&limit=100&cursor={cursor}"
+            # NOTE: limit is 50 because 100 causes internal server error for big inventories
+            url = f"https://trades.roblox.com/v2/users/{user_id}/tradableItems?sortBy=CreationTime&sortOrder=2&limit=50&cursor={cursor}"
 
             response = session.get(url)
 
