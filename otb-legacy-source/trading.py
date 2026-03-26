@@ -137,8 +137,8 @@ def get_xsrf():
 
 
 def add_extra_info(item):
-    # New method for outbound trades
-    if "Name" not in item:
+    # Statement for item info of v1 APIs (Inventory API)
+    if "buildersClubMembershipType" in item:
         item_name_encoded = item["name"].encode("utf-8")
         item["Name"] = item_name_encoded  # For compatibility
         item["name"] = item_name_encoded
@@ -165,21 +165,41 @@ def add_extra_info(item):
         item["buildersClubMembershipType"] = membership_type
         item["MembershipLevel"] = membership_type
         item["AveragePrice"] = int(item["recentAveragePrice"])
+
+    # Statement for the v2 APIs
     else:
-        # Old method for inbound trades
-        item["name"] = item["Name"]
+        item_name_encoded = item["itemName"].encode("utf-8")
+        item["name"] = item_name_encoded
+        item["Name"] = item_name_encoded
+        item["itemId"] = int(item["itemTarget"]["targetId"])
+        item["AveragePrice"] = int(item["recentAveragePrice"])
 
-        item["itemId"] = int(re.match(r".*/(\d+)/.*", item["ItemLink"]).group(1))
+        # This is a replacement to item_id for bundles
+        collectable_id = item.get("collectibleItemId")
+        item["collectibleItemId"] = collectable_id
 
-        item["AveragePrice"] = int(item["AveragePrice"])
+        item_instance_id = item.get("ItemInstanceId")
 
-    item_data = valuemanager.get_value(item["itemId"])
+        # Add instance Id if its from the trade inventory API
+        if item_instance_id:
+            item["collectibleItemInstanceId"] = item_instance_id
+        else:
+            item_instances = item.get("instances")
+            if item_instances:
+                item_instance_id = item_instances[0]["collectibleItemInstanceId"]
+                item["collectibleItemInstanceId"] = item_instance_id
+
+        item["userAssetId"] = item_instance_id
+        item["itemType"] = item["itemTarget"]["itemType"]
+
+    item_data = valuemanager.get_value(item)
 
     if item_data is None:
         return None
 
     item["value"] = item_data["value"]
     item["OriginalVolume"] = item_data["volume"]
+
     try:
         item["volume"] = calculate_volume(item["value"], item_data["volume"])
     except ZeroDivisionError:
@@ -218,14 +238,8 @@ def get_inventory(user_id):
         data = None
 
         for i in range(5):  # Up to 5 attempts
-            url = (
-                "https://inventory.roblox.com/v1/users/%(userId)i/assets/collectibles?"
-                "cursor=%(cursor)s&sortOrder=Desc&limit=100"
-                % {  # &assetType=%(assetTypeId)i" % {
-                    "userId": int(user_id),
-                    "cursor": cursor,
-                }
-            )  # , "assetTypeId": assetTypeId}
+            url = f"https://trades.roblox.com/v2/users/{user_id}/tradableItems?sortBy=CreationTime&sortOrder=2&limit=100&cursor={cursor}"
+
             response = session.get(url)
 
             data = json.loads(response.text)
@@ -251,7 +265,7 @@ def get_inventory(user_id):
             break
 
         cursor = data["nextPageCursor"]
-        inventory_raw += data["data"]
+        inventory_raw += data["items"]
 
     inventory = []
     for item in inventory_raw:
@@ -272,7 +286,6 @@ def get_inventory(user_id):
         item
         for item in inventory
         if item["value"] <= int(settings["Trading"]["maximum_item_value"])
-        and not item["isOnHold"]
     ]
 
     return inventory
@@ -427,7 +440,9 @@ def trade_side_to_str(side):
 def create_offer(user_id, items, robux):
     return {
         "userId": user_id,
-        "userAssetIds": [item["userAssetId"] for item in items],
+        "collectibleItemInstanceIds": [
+            item["collectibleItemInstanceId"] for item in items
+        ],
         "robux": robux,
     }
 
@@ -473,10 +488,10 @@ def send_trade(
         post_to_webhook=(not is_repeat),
     )
 
-    offers = [
-        create_offer(session.cookies["user_id"], trade[1], 0),
-        create_offer(user_id, trade[2], their_robux),
-    ]
+    offers = {
+        "senderOffer": create_offer(session.cookies["user_id"], trade[1], 0),
+        "recipientOffer": create_offer(user_id, trade[2], their_robux),
+    }
 
     if not skip_clock:
         while clock > 0:
@@ -486,9 +501,9 @@ def send_trade(
 
     if settings["Debugging"]["easy_debug"] != "true" and not testing:
         response = session.post(
-            "https://trades.roblox.com/v1/trades/send",
+            "https://trades.roblox.com/v2/trades/send",
             headers={"X-CSRF-TOKEN": get_xsrf()},
-            json={"offers": offers},
+            json=offers,
         )
 
         data = json.loads(response.text)
@@ -506,8 +521,11 @@ def send_trade(
         #     bl.add_block(user_id)
         #     log("Trade with %i: \"%s\", moving to next partner..." % (user_id, response["msg"]), mycolors.WARNING)
 
-        errors = data["errors"]
-        error_output_text = " ".join([error["message"] for error in errors])
+        if data.get("errors"):
+            errors = data["errors"]
+            error_output_text = " ".join([error["message"] for error in errors])
+        else:
+            error_output_text = data
 
         if response.status_code == 429:
             if "errors" in response.json():
@@ -537,7 +555,10 @@ def send_trade(
                 user_id, trade, skip_clock, trade_id, their_robux, is_repeat=True
             )
         else:
-            log("Failed to send trade. %s" % error_output_text, mycolors.FAIL)
+            log(
+                f"Failed to send trade. {error_output_text} payload: {offers}",
+                mycolors.FAIL,
+            )
             if "Challenge is required to authorize the request" in error_output_text:
                 ok = Authenticator.validate_2fa(response, session)
                 log(f"response from 2fa: {ok}", no_print=True)
@@ -578,7 +599,7 @@ def calculate_score(x):
 
 
 def pull_trade(session_id):
-    response = session.get("https://trades.roblox.com/v1/trades/%i" % session_id)
+    response = session.get("https://trades.roblox.com/v2/trades/%i" % session_id)
 
     data = json.loads(response.text)
 
@@ -644,24 +665,23 @@ def listen_for_inbound_trades():
                 my_offer = None
                 their_offer = None
 
-                for offer in trade_data["offers"]:
-                    if int(offer["user"]["id"]) == int(session.cookies["user_id"]):
-                        my_offer = copy.deepcopy(offer)
-                    else:
-                        their_offer = copy.deepcopy(offer)
-
-                assert my_offer is not None
-                assert their_offer is not None
+                try:
+                    my_offer = copy.deepcopy(trade_data["participantAOffer"])
+                    their_offer = copy.deepcopy(trade_data["participantBOffer"])
+                except:
+                    assert my_offer is not None
+                    assert their_offer is not None
+                    continue
 
                 my_items = [
                     info
-                    for item in my_offer["userAssets"]
+                    for item in my_offer["items"]
                     if (info := add_extra_info(item)) is not None
                 ]
 
                 their_items = [
                     info
-                    for item in their_offer["userAssets"]
+                    for item in their_offer["items"]
                     if (info := add_extra_info(item)) is not None
                 ]
 
