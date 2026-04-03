@@ -114,7 +114,9 @@ def generate_value(item):
         log(f"{item_name} uses collectible item id", mycolors.WARNING)
         while True:
             item_type_param = f"?itemType={itemType}" if itemType else "?itemType=Asset"
-            item_details_api = f"https://catalog.roblox.com/v1/catalog/items/{asset_id}/details{item_type_param}"
+            item_details_api = f"https://catalog.roblox.com/v1/catalog/items/{
+                asset_id
+            }/details{item_type_param}"
 
             item_details = session.get(item_details_api)
             if item_details.status_code == 429:
@@ -125,7 +127,9 @@ def generate_value(item):
                 time.sleep(15)
             if item_details.status_code != 200:
                 log(
-                    f"Failed to load item details. Continuing. {item_details.text} item_id: {asset_id} url: {item_details_api}",
+                    f"Failed to load item details. Continuing. {
+                        item_details.text
+                    } item_id: {asset_id} url: {item_details_api}",
                     mycolors.FAIL,
                 )
                 return
@@ -136,14 +140,19 @@ def generate_value(item):
             return
 
     if collectibleItemId:
-        url = f"https://apis.roblox.com/marketplace-sales/v1/item/{collectibleItemId}/resale-data"
+        url = f"https://apis.roblox.com/marketplace-sales/v1/item/{
+            collectibleItemId
+        }/resale-data"
     # Bundles (Faces) are always going to use the new API and asset collectibleItemId to see resale data.
     elif collectibleItemInstanceId and itemType == "Bundle":
         collectable_id = get_collectible_id_from_asset(item_id)
-        url = f"https://apis.roblox.com/marketplace-sales/v1/item/{collectable_id}/resale-data"
+        url = f"https://apis.roblox.com/marketplace-sales/v1/item/{
+            collectable_id
+        }/resale-data"
     else:
         resale_id = item_id
 
+    retry_delay = 15
     while True:
         # NOTE: Assume the URL is the v1 API (all older items)
         if url is None:
@@ -160,19 +169,24 @@ def generate_value(item):
                 "Got too many requests on resale-data, Waiting 15s and trying again.",
                 mycolors.WARNING,
             )
-            time.sleep(15)
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 120)
             continue
         # NOTE: Handle new items that use the v2 API
         elif response.status_code == 400 or response.status_code == 404:
             collectable_id = get_collectible_id_from_asset(item_id)
             if collectable_id:
-                url = f"https://apis.roblox.com/marketplace-sales/v1/item/{collectable_id}/resale-data"
+                url = f"https://apis.roblox.com/marketplace-sales/v1/item/{
+                    collectable_id
+                }/resale-data"
             else:
                 log(f"couldn't resolve status 400 for {item}")
                 return
         else:
             log(
-                f"unxepected response for resolving collectable_id {response.text} : {response.status_code} : {response.url}"
+                f"unxepected response for resolving collectable_id {response.text} : {
+                    response.status_code
+                } : {response.url}"
             )
             return
 
