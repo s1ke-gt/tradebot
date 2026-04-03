@@ -166,7 +166,7 @@ def generate_value(item):
             break
         if response.status_code == 429:
             log(
-                "Got too many requests on resale-data, Waiting 15s and trying again.",
+                f"Got too many requests on resale-data, Waiting {retry_delay} and trying again.",
                 mycolors.WARNING,
             )
             time.sleep(retry_delay)
