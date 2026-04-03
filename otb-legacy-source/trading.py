@@ -227,18 +227,13 @@ def get_inventory(user_id):
     MAX_RETRIES = 5
     cursor = ""
     while cursor is not None:
-        url = (
-            f"https://trades.roblox.com/v2/users/{user_id}"
-            f"/tradableItems?sortBy=CreationTime&sortOrder=2&limit=50&cursor={cursor}"
-        )
+        url = f"https://trades.roblox.com/v2/users/{user_id}/tradableItems?sortBy=CreationTime&sortOrder=2&limit=50&cursor={cursor}"
 
         for attempt in range(MAX_RETRIES):
             response = session.get(url)
             if response.status_code == 429:
                 log(
-                    f"Loading inventory throttled. Attempt {attempt + 1}/{
-                        MAX_RETRIES
-                    }.",
+                    f"Loading inventory throttled. Attempt {attempt + 1}/{MAX_RETRIES}.",
                     mycolors.WARNING,
                 )
                 time.sleep(10)
@@ -260,9 +255,7 @@ def get_inventory(user_id):
             # Check for response
             if response.status_code != 200:
                 log(
-                    f"Inventory request failed with status {
-                        response.status_code
-                    }. Attempt {attempt + 1}/{MAX_RETRIES}.",
+                    f"Inventory request failed with status {response.status_code}. Attempt {attempt + 1}/{MAX_RETRIES}.",
                     mycolors.WARNING,
                 )
                 time.sleep(1)
@@ -553,9 +546,7 @@ def send_trade(
                 ):
                     cooldowns.items_on_hold_event.set()
                     log(
-                        f"{
-                            session.cookies['username']
-                        } has hit the daily 100 trade limit waiting 3 hours, then retrying",
+                        f"{session.cookies['username']} has hit the daily 100 trade limit waiting 3 hours, then retrying",
                         mycolors.WARNING,
                         post_to_webhook=True,
                     )
@@ -690,16 +681,17 @@ def listen_for_inbound_trades():
             for tradeInfo in inbound:
                 trade_data = pull_trade(tradeInfo["id"])
 
-                my_offer = None
-                their_offer = None
-
-                try:
-                    my_offer = copy.deepcopy(trade_data["participantAOffer"])
-                    their_offer = copy.deepcopy(trade_data["participantBOffer"])
-                except:
-                    assert my_offer is not None
-                    assert their_offer is not None
+                if (
+                    "participantAOffer" not in trade_data
+                    or "participantBOffer" not in trade_data
+                ):
+                    logging.warning(
+                        "trade_data missing participantAOffer or participantBOffer, skipping trade."
+                    )
                     continue
+
+                my_offer = copy.deepcopy(trade_data["participantAOffer"])
+                their_offer = copy.deepcopy(trade_data["participantBOffer"])
 
                 my_items = [
                     info
@@ -1139,7 +1131,7 @@ def search_for_trades(user_id, guarantee_trade=False):
     #
     # Add ratelimit throttle to prevent spamming this API
     global can_trade_throttle, can_trade_timestamp, can_trade_backoff
-    if can_trade_throttle and time.time() - can_trade_timestamp < 30:
+    if can_trade_throttle and time.time() - can_trade_timestamp < can_trade_backoff:
         # Still throttled, skip the request and assume we can trade
         pass
     else:
