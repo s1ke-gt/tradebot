@@ -243,15 +243,8 @@ def get_inventory(user_id):
                 )
                 time.sleep(10)
                 continue
-            if response.status_code != 200:
-                log(
-                    f"Inventory request failed with status {
-                        response.status_code
-                    }. Attempt {attempt + 1}/{MAX_RETRIES}.",
-                    mycolors.WARNING,
-                )
-                time.sleep(1)
-                continue
+
+            # Check for any errors in response
             try:
                 data = json.loads(response.text)
             except json.JSONDecodeError:
@@ -264,6 +257,17 @@ def get_inventory(user_id):
                     logging.warning("Failed to load inventory: %s", err["message"])
 
                 raise FailedToLoadInventoryException
+
+            # Check for response
+            if response.status_code != 200:
+                log(
+                    f"Inventory request failed with status {
+                        response.status_code
+                    }. Attempt {attempt + 1}/{MAX_RETRIES}.",
+                    mycolors.WARNING,
+                )
+                time.sleep(1)
+                continue
 
             if response.status_code == 200:
                 break
@@ -1253,9 +1257,13 @@ def search_for_trades(user_id, guarantee_trade=False):
 
     if len(my_inventory) == 0:
         log(
-            "There are no tradable items or they have all been filtered out.",
-            mycolors.WARNING,
+            "You dont have enough tradable items or they have all been filtered out by maximum_xv1, retrying in 30 minutes...",
+            mycolors.FAIL,
         )
+        cooldowns.items_on_hold_event.set()
+        time.sleep(1800)
+        cooldowns.items_on_hold_event.clear()
+
         return
 
     try:
