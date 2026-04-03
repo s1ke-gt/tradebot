@@ -247,16 +247,15 @@ def get_inventory(user_id):
             # Check for any errors in response
             try:
                 data = json.loads(response.text)
+
+                if "errors" in data:
+                    for err in data["errors"]:
+                        logging.warning("Failed to load inventory: %s", err["message"])
+                    raise FailedToLoadInventoryException
             except json.JSONDecodeError:
                 logging.warning(
                     "Failed to parse inventory JSON on attempt %d", attempt + 1
                 )
-                continue
-            if "errors" in data:
-                for err in data["errors"]:
-                    logging.warning("Failed to load inventory: %s", err["message"])
-
-                raise FailedToLoadInventoryException
 
             # Check for response
             if response.status_code != 200:
@@ -1123,24 +1122,49 @@ tradeSendQueueRunnerThread = threading.Thread(target=trade_send_queue_runner)
 tradeSendQueueRunnerThread.daemon = True
 tradeSendQueueRunnerThread.start()
 
+can_trade_throttle = False
+can_trade_timestamp = 0
+can_trade_backoff = 30
+
 
 def search_for_trades(user_id, guarantee_trade=False):
     log("Searching for trades with %i..." % user_id)
+    # Dont scan the same person..
+    cooldowns.add_cooldown(user_id)
 
     # If precheck is set to false in the lines following, then we will not look for trades with this user.
     precheck = True
 
-    # Check if we are allowed to trade with the user
-    response = session.get(
-        "https://trades.roblox.com/v1/users/%i/can-trade-with" % user_id
-    )
-    # Sometimes Roblox will throttle this,
-    # so in that case just don't bother with checking if we can trade with the user.
-    if response.status_code == 200:
-        data = json.loads(response.text)
-        can_trade_with = data["canTrade"]
-        if not can_trade_with:
-            precheck = False
+    # TODO: Use more APIs to check if can_trade
+    #
+    # Add ratelimit throttle to prevent spamming this API
+    global can_trade_throttle, can_trade_timestamp, can_trade_backoff
+    if can_trade_throttle and time.time() - can_trade_timestamp < 30:
+        # Still throttled, skip the request and assume we can trade
+        pass
+    else:
+        if can_trade_throttle:
+            # 30 seconds have passed, reset throttle
+            can_trade_throttle = False
+            can_trade_backoff = 30
+
+        response = session.get(
+            "https://trades.roblox.com/v1/users/%i/can-trade-with" % user_id
+        )
+
+        if response.status_code == 200:
+            data = json.loads(response.text)
+            can_trade_with = data["canTrade"]
+            if not can_trade_with:
+                precheck = False
+
+        elif response.status_code == 429:
+            can_trade_throttle = True
+            can_trade_timestamp = time.time()
+            can_trade_backoff = min(can_trade_backoff * 2, 180)
+            log(
+                f"can-trade-with throttled, backing off for {can_trade_backoff} seconds"
+            )
 
     # Check that the user is not a Roblox administrator
     is_admin = False
@@ -1158,7 +1182,7 @@ def search_for_trades(user_id, guarantee_trade=False):
                 is_admin = True
                 precheck = False
 
-    if not precheck:
+    if precheck is False:
         if is_admin:
             # log("Skipping user because they're admin.")
             # Block the user
@@ -1172,15 +1196,19 @@ def search_for_trades(user_id, guarantee_trade=False):
         my_inventory = get_inventory(session.cookies["user_id"])
     except FailedToLoadInventoryException:
         log("Failed to load own inventory.", mycolors.FAIL)
+        # Avoid Inventory throttle
+        time.sleep(10)
         logging.exception("Caught exception while getting my_inventory")
         return
     try:
         their_inventory = get_inventory(user_id)
     except FailedToLoadInventoryException:
         log(
-            f"Skipping getting inventory for user {user_id}",
+            f"Skipping getting inventory for user {user_id}...",
             mycolors.WARNING,
         )
+        # Avoid Inventory throttle
+        time.sleep(10)
         logging.exception("Caught exception while getting their inventory")
         return
 
