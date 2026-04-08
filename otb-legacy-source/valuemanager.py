@@ -114,9 +114,7 @@ def generate_value(item):
         log(f"{item_name} uses collectible item id", mycolors.WARNING)
         while True:
             item_type_param = f"?itemType={itemType}" if itemType else "?itemType=Asset"
-            item_details_api = f"https://catalog.roblox.com/v1/catalog/items/{
-                asset_id
-            }/details{item_type_param}"
+            item_details_api = f"https://catalog.roblox.com/v1/catalog/items/{asset_id}/details{item_type_param}"
 
             item_details = session.get(item_details_api)
             if item_details.status_code == 429:
