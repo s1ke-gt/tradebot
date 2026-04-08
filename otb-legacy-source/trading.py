@@ -231,6 +231,7 @@ def get_inventory(user_id):
         for attempt in range(MAX_RETRIES):
             response = session.get(url)
             if response.status_code == 200:
+                data = json.loads(response.text)
                 break
             elif response.status_code == 429:
                 log(
