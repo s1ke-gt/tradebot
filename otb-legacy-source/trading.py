@@ -1,5 +1,4 @@
 import copy
-import sys
 import itertools
 import json
 import logging
