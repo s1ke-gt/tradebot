@@ -290,7 +290,8 @@ def get_inventory(user_id):
         try:
             new_item = add_extra_info(item)
         except Exception as e:
-            log(f"skipping item from fetching inventory")
+            log(f"skipping item from fetching inventory: {e}", mycolors.FAIL)
+            continue
         if new_item is None:
             continue
         # Only do this for our inventory
@@ -744,7 +745,7 @@ def listen_for_inbound_trades():
                         if (info := add_extra_info(item)) is not None
                     ]
                 except Exception as e:
-                    log(f"failed to add item data to inbound trade", mycolors.FAIL)
+                    log(f"failed to add item data to inbound trade: {e}", mycolors.FAIL)
                     continue
 
                 my_items_original = copy.deepcopy(my_items)
