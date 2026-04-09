@@ -137,61 +137,74 @@ def get_xsrf():
 
 def add_extra_info(item):
     # Statement for item info of v1 APIs (Inventory API)
-    if "buildersClubMembershipType" in item:
-        item_name_encoded = item["name"].encode("utf-8")
-        item["Name"] = item_name_encoded  # For compatibility
-        item["name"] = item_name_encoded
-        item["itemId"] = int(item["assetId"])
+    try:
+        if "buildersClubMembershipType" in item:
+            item_name_encoded = item["name"].encode("utf-8")
+            item["Name"] = item_name_encoded  # For compatibility
+            item["name"] = item_name_encoded
+            item["itemId"] = int(item["assetId"])
 
-        item["ImageLink"] = (
-            "https://www.roblox.com/asset-thumbnail/image?assetId=%i&height=110&width=110"
-            % (item["assetId"])
-        )
-        item["ItemLink"] = "https://www.roblox.com/catalog/%i/--" % item["assetId"]
-        item["SerialNumber"] = item["serialNumber"]
-        item["SerialNumberTotal"] = item[
-            "assetStock"
-        ]  # I think this is correct but not entirely sure
-        item["OriginalPrice"] = item["originalPrice"]
-        item["userAssetID"] = item["assetId"]
-        item["UserAssetID"] = item["assetId"]
+            item["ImageLink"] = (
+                "https://www.roblox.com/asset-thumbnail/image?assetId=%i&height=110&width=110"
+                % (item["assetId"])
+            )
+            item["ItemLink"] = "https://www.roblox.com/catalog/%i/--" % item["assetId"]
+            item["SerialNumber"] = item["serialNumber"]
+            item["SerialNumberTotal"] = item[
+                "assetStock"
+            ]  # I think this is correct but not entirely sure
+            item["OriginalPrice"] = item["originalPrice"]
+            item["userAssetID"] = item["assetId"]
+            item["UserAssetID"] = item["assetId"]
 
-        membership_type = (
-            item["buildersClubMembershipType"]
-            if "buildersClubMembershipType" in item
-            else item["membershipType"]
-        )
-        item["buildersClubMembershipType"] = membership_type
-        item["MembershipLevel"] = membership_type
-        item["AveragePrice"] = int(item["recentAveragePrice"])
+            membership_type = (
+                item["buildersClubMembershipType"]
+                if "buildersClubMembershipType" in item
+                else item["membershipType"]
+            )
+            item["buildersClubMembershipType"] = membership_type
+            item["MembershipLevel"] = membership_type
+            item["AveragePrice"] = int(item["recentAveragePrice"])
 
-    # Statement for the v2 APIs
-    else:
-        item_name_encoded = item["itemName"].encode("utf-8")
-        item["name"] = item_name_encoded
-        item["Name"] = item_name_encoded
-        item["itemId"] = int(item["itemTarget"]["targetId"])
-        item["AveragePrice"] = int(item["recentAveragePrice"])
-
-        # This is a replacement to item_id for bundles
-        collectable_id = item.get("collectibleItemId")
-        item["collectibleItemId"] = collectable_id
-
-        item_instance_id = item.get("itemInstanceId")
-
-        # Add instance Id if its from the trade inventory API
-        item_instances = item.get("instances")
-        if item_instance_id:
-            item["collectibleItemInstanceId"] = item_instance_id
+        # Statement for the v2 APIs
         else:
-            if item_instances:
-                item_instance_id = item_instances[0]["collectibleItemInstanceId"]
-                item["collectibleItemInstanceId"] = item_instance_id
-        if item_instances:
-            item["isOnHold"] = item_instances[0]["isOnHold"]
+            item_name_encoded = item["itemName"].encode("utf-8")
+            item["name"] = item_name_encoded
+            item["Name"] = item_name_encoded
+            item["itemId"] = int(item["itemTarget"]["targetId"])
+            item["AveragePrice"] = int(item["recentAveragePrice"])
 
-        item["userAssetId"] = item_instance_id
-        item["itemType"] = item["itemTarget"]["itemType"]
+            # This is a replacement to item_id for bundles
+            collectable_id = item.get("collectibleItemId")
+            item["collectibleItemId"] = collectable_id
+
+            item_instance_id = item.get("itemInstanceId")
+
+            # Add instance Id if its from the trade inventory API
+            item_instances = item.get("instances")
+            if item_instance_id:
+                item["collectibleItemInstanceId"] = item_instance_id
+            else:
+                if item_instances:
+                    item_instance_id = item_instances[0]["collectibleItemInstanceId"]
+                    item["collectibleItemInstanceId"] = item_instance_id
+            if item_instances:
+                item["isOnHold"] = item_instances[0]["isOnHold"]
+
+            item["userAssetId"] = item_instance_id
+            item["itemType"] = item["itemTarget"]["itemType"]
+    except KeyError as e:
+        log(f"malformed response - missing expected field: {e}", mycolors.FAIL)
+        log(f"problematic item: {item}", mycolors.FAIL)
+        raise
+    except (ValueError, TypeError) as e:
+        log(f"malformed response - type conversion error: {e}")
+        log(f"problematic item: {item}", mycolors.FAIL)
+        raise
+    except Exception as e:
+        log(f"unexpected error processing response: {e}", mycolors.FAIL)
+        log(f"problematic item: {item}", mycolors.FAIL)
+        raise
 
     item_data = valuemanager.get_value(item)
 
@@ -274,7 +287,10 @@ def get_inventory(user_id):
 
     inventory = []
     for item in inventory_raw:
-        new_item = add_extra_info(item)
+        try:
+            new_item = add_extra_info(item)
+        except Exception as e:
+            log(f"skipping item from fetching inventory")
         if new_item is None:
             continue
         # Only do this for our inventory
@@ -290,7 +306,7 @@ def get_inventory(user_id):
         item
         for item in inventory
         if item["value"] <= int(settings["Trading"]["maximum_item_value"])
-        and not item.get("isOnHold", True)
+        and not item["isOnHold"]
     ]
     return inventory
 
@@ -715,17 +731,21 @@ def listen_for_inbound_trades():
                     logging.warning(f"no self_user id in {trade_data}")
                     continue
 
-                my_items = [
-                    info
-                    for item in my_offer["items"]
-                    if (info := add_extra_info(item)) is not None
-                ]
+                try:
+                    my_items = [
+                        info
+                        for item in my_offer["items"]
+                        if (info := add_extra_info(item)) is not None
+                    ]
 
-                their_items = [
-                    info
-                    for item in their_offer["items"]
-                    if (info := add_extra_info(item)) is not None
-                ]
+                    their_items = [
+                        info
+                        for item in their_offer["items"]
+                        if (info := add_extra_info(item)) is not None
+                    ]
+                except Exception as e:
+                    log(f"failed to add item data to inbound trade", mycolors.FAIL)
+                    continue
 
                 my_items_original = copy.deepcopy(my_items)
                 their_items_original = copy.deepcopy(their_items)
