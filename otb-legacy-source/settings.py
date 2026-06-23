@@ -37,6 +37,12 @@ use_old_value_algorithm = true
 # Tells the bot to not trade items above this value
 maximum_item_value = 27500
 
+# Before valuing another user's inventory, skip items with RAP above your
+# tradable account RAP multiplied by this number. This prevents unnecessary
+# resale-data lookups for items you cannot realistically trade for.
+# Set to none to disable this pre-filter.
+partner_rap_scan_limit_multiplier = 1.5
+
 #If this setting is true, it will value overpriced/projected items at their RAP if RAP is higher than value
 # This can make it send ridiculous trades if a lot of items have RAP higher than value, which is often true.
 value_op_items_at_rap = false
