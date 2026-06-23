@@ -1,9 +1,3 @@
-# otb-legacy
-
-Roblox trading bot
-- https://olympian.xyz
-- https://discord.gg/mmXtqGu (OTB Discord)
-
 
 # Install Guide
 > [!NOTE]
