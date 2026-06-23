@@ -10,6 +10,10 @@ ROBLOSECURITY = put your .roblosecurity here
 # https://www.youtube.com/watch?v=2SdEivsw8yA (This video shows how to get the Authenticator Secret at 0:25)
 authenticator_code = enter auth code here
 
+# Optional: _RoliVerification cookie from Rolimon's, used by the local dashboard
+# to post trade advertisements through the ROLI trade ads API.
+roli_verification = enter roli verification here
+
 
 colors = false
 
