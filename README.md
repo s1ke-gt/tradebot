@@ -30,10 +30,6 @@ python otb-legacy-source/tradingbot.py
 python otb-legacy-source/dashboard.py
 ```
 
-On Windows, you can also double-click `otb-legacy-source/olympian.bat`; it
-launches the same local dashboard using your installed Python rather than a
-nonexistent `olympian.exe`.
-
 The dashboard runs locally at `http://127.0.0.1:8765/` and provides first-time
 setup, account status, bot start/stop controls, local trade statistics, and a
 ROLI trade ad posting form.
