@@ -47,7 +47,6 @@ DEFAULT_CONFIG = {
         "testing": "false",
         "use_old_value_algorithm": "true",
         "maximum_item_value": "27500",
-        "partner_rap_scan_limit_multiplier": "1.5",
         "value_op_items_at_rap": "false",
         "not_for_trade": "0",
         "do_not_trade_away": "0",
