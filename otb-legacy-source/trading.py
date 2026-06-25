@@ -231,8 +231,19 @@ class AllSelfItemsHoldException(Exception):
     pass
 
 
+def get_recent_average_price(item):
+    """
+    Extract RAP from either the older inventory shape or the current tradable
+    items API shape without generating a full value.
+    """
+    try:
+        return int(item["recentAveragePrice"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 @cached(cache=TTLCache(maxsize=4096, ttl=300))
-def get_inventory(user_id):
+def get_inventory(user_id, max_recent_average_price=None):
     user_id = int(user_id)
     inventory_raw = []
 
@@ -284,6 +295,21 @@ def get_inventory(user_id):
         except Exception:
             log("Failed to items from inventory response", mycolors.FAIL)
             raise FailedToLoadInventoryException
+
+    if max_recent_average_price is not None:
+        inventory_before_filter = len(inventory_raw)
+        inventory_raw = [
+            item
+            for item in inventory_raw
+            if (get_recent_average_price(item) or 0) <= max_recent_average_price
+        ]
+        skipped_items = inventory_before_filter - len(inventory_raw)
+        if skipped_items > 0:
+            log(
+                "Skipped valuing %i items above RAP scan limit %i for user %i."
+                % (skipped_items, max_recent_average_price, user_id),
+                mycolors.WARNING,
+            )
 
     inventory = []
     for item in inventory_raw:
@@ -854,6 +880,23 @@ def listen_for_inbound_trades():
                 if settings["Trading"]["apply_minimum_rap_to_inbound"] == "false":
                     minimum_rap_gain = None
 
+                maximum_inbound_rap_loss_setting = settings["Trading"][
+                    "maximum_inbound_rap_loss"
+                ]
+                if maximum_inbound_rap_loss_setting != "none":
+                    try:
+                        maximum_inbound_rap_loss = float(
+                            maximum_inbound_rap_loss_setting
+                        )
+                    except (TypeError, ValueError):
+                        log(
+                            "Invalid maximum_inbound_rap_loss setting; allowing no inbound RAP loss.",
+                            mycolors.WARNING,
+                        )
+                        maximum_inbound_rap_loss = 0
+                else:
+                    maximum_inbound_rap_loss = None
+
                 if minimum_value_gain is not None:
                     if 1 > minimum_value_gain >= 0:
                         their_value_requirement = my_total * (1 + minimum_value_gain)
@@ -900,6 +943,20 @@ def listen_for_inbound_trades():
                 else:
                     meets_rap_requirement = True
 
+                meets_inbound_rap_loss_requirement = True
+                if maximum_inbound_rap_loss is not None:
+                    if 1 > maximum_inbound_rap_loss >= 0:
+                        minimum_allowed_inbound_rap = my_total_rap * (
+                            1 - maximum_inbound_rap_loss
+                        )
+                    else:
+                        minimum_allowed_inbound_rap = (
+                            my_total_rap - maximum_inbound_rap_loss
+                        )
+                    meets_inbound_rap_loss_requirement = (
+                        their_total_rap >= minimum_allowed_inbound_rap
+                    )
+
                 if (
                     max(my_total_rap, their_total_rap, my_total, their_total)
                     > max_handle_value
@@ -928,9 +985,16 @@ def listen_for_inbound_trades():
                 if not meets_volume_slippage_allowance:
                     log("Trade fails to meet maximum volume slippage allowance.")
 
+                if not meets_inbound_rap_loss_requirement:
+                    log(
+                        "Trade fails inbound RAP loss safety: giving %i RAP for %i RAP."
+                        % (my_total_rap, their_total_rap)
+                    )
+
                 if (
                     meets_value_requirement
                     and meets_rap_requirement
+                    and meets_inbound_rap_loss_requirement
                     and my_robux == 0
                     and not contains_bad_item
                     and meets_volume_slippage_allowance
@@ -1238,8 +1302,33 @@ def search_for_trades(user_id, guarantee_trade=False):
         time.sleep(10)
         logging.exception("Caught exception while getting my_inventory")
         return
+
+    def partner_rap_scan_limit(inventory):
+        multiplier = settings["Trading"].get("partner_rap_scan_limit_multiplier", "none")
+        if multiplier == "none":
+            return None
+
+        try:
+            multiplier = float(multiplier)
+        except (TypeError, ValueError):
+            log(
+                "Invalid partner_rap_scan_limit_multiplier setting; disabling partner RAP pre-filter.",
+                mycolors.WARNING,
+            )
+            return None
+
+        if multiplier <= 0:
+            return None
+
+        tradable_account_rap = sum(item["AveragePrice"] for item in inventory)
+        if tradable_account_rap <= 0:
+            return None
+
+        return int(tradable_account_rap * multiplier)
+
+    their_rap_scan_limit = partner_rap_scan_limit(my_inventory)
     try:
-        their_inventory = get_inventory(user_id)
+        their_inventory = get_inventory(user_id, their_rap_scan_limit)
     except FailedToLoadInventoryException:
         log(
             f"Skipping getting inventory for user {user_id}...",

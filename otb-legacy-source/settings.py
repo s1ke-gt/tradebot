@@ -10,6 +10,10 @@ ROBLOSECURITY = put your .roblosecurity here
 # https://www.youtube.com/watch?v=2SdEivsw8yA (This video shows how to get the Authenticator Secret at 0:25)
 authenticator_code = enter auth code here
 
+# Optional: _RoliVerification cookie from Rolimon's, used by the local dashboard
+# to post trade advertisements through the ROLI trade ads API.
+roli_verification = enter roli verification here
+
 
 colors = false
 
@@ -32,6 +36,12 @@ use_old_value_algorithm = true
 
 # Tells the bot to not trade items above this value
 maximum_item_value = 27500
+
+# Before valuing another user's inventory, skip items with RAP above your
+# tradable account RAP multiplied by this number. This prevents unnecessary
+# resale-data lookups for items you cannot realistically trade for.
+# Set to none to disable this pre-filter.
+partner_rap_scan_limit_multiplier = 1.5
 
 #If this setting is true, it will value overpriced/projected items at their RAP if RAP is higher than value
 # This can make it send ridiculous trades if a lot of items have RAP higher than value, which is often true.
@@ -139,6 +149,11 @@ additional_minimum_value_gain_per_item_downgraded = 0.05
 # Set to 'none' to disable
 minimum_rap_gain = none
 apply_minimum_rap_to_inbound = true
+
+# Extra inbound-only RAP safety net. Even when minimum_rap_gain is disabled,
+# inbound accepts will be rejected if the trade loses more RAP than this.
+# 0 means no RAP loss is allowed. Set to none to disable.
+maximum_inbound_rap_loss = 0
 
 # The minimum trade value to send the trade. It is the sum of the value of all items from both sides. 
 # Does not take Robux into account.
