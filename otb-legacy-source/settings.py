@@ -145,10 +145,25 @@ minimum_value_gain = 1
 apply_minimum_value_to_inbound = true
 additional_minimum_value_gain_per_item_downgraded = 0.05
 
+# Trade cycle controls outbound searching when trade_cycle.txt is UPG or DG.
+# UPG allows giving more items for fewer larger items with up to this percent value loss.
+upgrade_maximum_value_loss_percent = 0.03
+# DG requires receiving more items with at least this percent value overpay.
+downgrade_minimum_value_gain_percent = 0.10
+
 # If less than one, it will be treated as a percent. If more than or equal to 1, it will be treated as an constant
 # Set to 'none' to disable
 minimum_rap_gain = none
 apply_minimum_rap_to_inbound = true
+
+# Extra inbound-only RAP safety net. Even when minimum_rap_gain is disabled,
+# inbound accepts will be rejected if the trade loses more RAP than this.
+# 0 means no RAP loss is allowed. Set to none to disable.
+maximum_inbound_rap_loss = 0
+
+# If true, inbound trades offering an item listed in faces.txt are declined and
+# the bot immediately searches for a counter offer without those dynamic heads/faces.
+auto_counter_dynamic_faces = false
 
 # The minimum trade value to send the trade. It is the sum of the value of all items from both sides. 
 # Does not take Robux into account.
