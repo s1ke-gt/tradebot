@@ -26,8 +26,6 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 SOURCE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT_DIR / "config.ini"
 LOG_DIR = ROOT_DIR / "logs"
-TRADE_CYCLE_PATH = ROOT_DIR / "trade_cycle.txt"
-FACES_PATH = ROOT_DIR / "faces.txt"
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("OTB_DASHBOARD_PORT", "8765"))
 
@@ -49,7 +47,6 @@ DEFAULT_CONFIG = {
         "testing": "false",
         "use_old_value_algorithm": "true",
         "maximum_item_value": "27500",
-        "partner_rap_scan_limit_multiplier": "1.5",
         "value_op_items_at_rap": "false",
         "not_for_trade": "0",
         "do_not_trade_away": "0",
@@ -79,12 +76,8 @@ DEFAULT_CONFIG = {
         "minimum_value_gain": "1",
         "apply_minimum_value_to_inbound": "true",
         "additional_minimum_value_gain_per_item_downgraded": "0.05",
-        "upgrade_maximum_value_loss_percent": "0.03",
-        "downgrade_minimum_value_gain_percent": "0.10",
         "minimum_rap_gain": "none",
         "apply_minimum_rap_to_inbound": "true",
-        "maximum_inbound_rap_loss": "0",
-        "auto_counter_dynamic_faces": "false",
         "minimum_trade_value": "100",
         "max_weighted_item_volume_slippage_allowance": "none",
         "weighted_item_volume_high_value_bias": "1.5",
@@ -176,16 +169,16 @@ HTML = r"""
       <section id="settings" class="grid" style="margin-top:18px"><div class="card full"><h3>Settings</h3><p class="muted">Use setup to update account credentials and core bot preferences.</p><button id="openSetup" class="secondary">Open setup</button></div></section>
     </main>
   </div>
-  <div id="setup" class="setup"><div class="modal"><h2>First-time setup</h2><p class="muted">Settings are saved locally to config.ini. Keep credentials private.</p><div class="form-grid"><div><label>.ROBLOSECURITY</label><input id="cfgRoblo" type="password"></div><div><label>Authenticator secret</label><input id="cfgAuth" type="password"></div><div><label>ROLI verification</label><input id="cfgRoli" type="password"></div><div><label>Webhook URL</label><input id="cfgWebhook" placeholder="none"></div><div><label>Testing mode</label><select id="cfgTesting"><option value="true">true - dry run</option><option value="false">false - real actions</option></select></div><div><label>Handle inbound trades</label><select id="cfgInbound"><option>true</option><option>false</option></select></div><div><label>Minimum value gain</label><input id="cfgMinGain"></div><div><label>Maximum item value</label><input id="cfgMaxItem"></div><div><label>Minimum time between trades</label><input id="cfgCooldown"></div><div><label>Minimum volume</label><input id="cfgVolume"></div><div><label>Starting trade cycle</label><select id="cfgCycle"><option value="UPG">UPG - upgrade</option><option value="DG">DG - downgrade</option></select></div><div><label>Upgrade max value loss</label><input id="cfgUpgLoss" placeholder="0.03"></div><div><label>Downgrade min overpay</label><input id="cfgDgGain" placeholder="0.10"></div><div><label>Auto-counter faces.txt items</label><select id="cfgFaceCounter"><option value="false">false</option><option value="true">true</option></select></div></div><div class="actions" style="margin-top:18px"><button id="saveSetup">Save setup</button><button id="closeSetup" class="secondary">Close</button></div></div></div>
+  <div id="setup" class="setup"><div class="modal"><h2>First-time setup</h2><p class="muted">Settings are saved locally to config.ini. Keep credentials private.</p><div class="form-grid"><div><label>.ROBLOSECURITY</label><input id="cfgRoblo" type="password"></div><div><label>Authenticator secret</label><input id="cfgAuth" type="password"></div><div><label>ROLI verification</label><input id="cfgRoli" type="password"></div><div><label>Webhook URL</label><input id="cfgWebhook" placeholder="none"></div><div><label>Testing mode</label><select id="cfgTesting"><option value="true">true - dry run</option><option value="false">false - real actions</option></select></div><div><label>Handle inbound trades</label><select id="cfgInbound"><option>true</option><option>false</option></select></div><div><label>Minimum value gain</label><input id="cfgMinGain"></div><div><label>Maximum item value</label><input id="cfgMaxItem"></div><div><label>Minimum time between trades</label><input id="cfgCooldown"></div><div><label>Minimum volume</label><input id="cfgVolume"></div></div><div class="actions" style="margin-top:18px"><button id="saveSetup">Save setup</button><button id="closeSetup" class="secondary">Close</button></div></div></div>
   <div id="toast" class="toast"></div>
 <script>
 const $ = id => document.getElementById(id);
 function toast(msg){ $('toast').textContent = msg; $('toast').classList.add('show'); setTimeout(()=>$('toast').classList.remove('show'), 5000); }
 async function api(path, opts={}){ const res = await fetch(path, {headers:{'Content-Type':'application/json'}, ...opts}); const data = await res.json(); if(!res.ok) throw new Error(data.error || 'Request failed'); return data; }
-function fillConfig(cfg){ const g=cfg.General||{}, t=cfg.Trading||{}; $('cfgRoblo').value=g.roblosecurity||''; $('cfgAuth').value=g.authenticator_code||''; $('cfgRoli').value=g.roli_verification||''; $('cfgWebhook').value=g.webhook_url||'none'; $('cfgTesting').value=t.testing||'true'; $('cfgInbound').value=t.handle_inbound_trades||'true'; $('cfgMinGain').value=t.minimum_value_gain||'1'; $('cfgMaxItem').value=t.maximum_item_value||'27500'; $('cfgCooldown').value=t.minimum_time_between_trades||'30'; $('cfgVolume').value=t.minimum_volume||'.15'; $('cfgCycle').value=(cfg.Runtime||{}).trade_cycle||'UPG'; $('cfgUpgLoss').value=t.upgrade_maximum_value_loss_percent||'0.03'; $('cfgDgGain').value=t.downgrade_minimum_value_gain_percent||'0.10'; $('cfgFaceCounter').value=t.auto_counter_dynamic_faces||'false'; $('adPlayerId').value=g.last_player_id||''; }
+function fillConfig(cfg){ const g=cfg.General||{}, t=cfg.Trading||{}; $('cfgRoblo').value=g.roblosecurity||''; $('cfgAuth').value=g.authenticator_code||''; $('cfgRoli').value=g.roli_verification||''; $('cfgWebhook').value=g.webhook_url||'none'; $('cfgTesting').value=t.testing||'true'; $('cfgInbound').value=t.handle_inbound_trades||'true'; $('cfgMinGain').value=t.minimum_value_gain||'1'; $('cfgMaxItem').value=t.maximum_item_value||'27500'; $('cfgCooldown').value=t.minimum_time_between_trades||'30'; $('cfgVolume').value=t.minimum_volume||'.15'; $('adPlayerId').value=g.last_player_id||''; }
 function render(data){ $('botStatus').textContent=data.bot.running?'Running':'Stopped'; $('statusDot').className='dot '+(data.bot.running?'running':''); $('accountName').textContent=data.account.name||'Not connected'; $('accountMeta').textContent=data.account.id?`User ID ${data.account.id}`:(data.setup_complete?'Configured locally; account lookup unavailable.':'Setup required.'); $('tradesSent').textContent=data.stats.trades_sent; $('queuedTrades').textContent=data.stats.queued_trades; $('logFiles').textContent=data.stats.log_files; $('lastEvent').textContent=data.stats.last_event||'—'; fillConfig(data.config); if(!data.setup_complete) $('setup').classList.add('open'); }
 async function refresh(){ try { render(await api('/api/status')); } catch(e){ toast(e.message); } }
-async function saveSetup(){ const body={General:{roblosecurity:$('cfgRoblo').value, authenticator_code:$('cfgAuth').value, roli_verification:$('cfgRoli').value, webhook_url:$('cfgWebhook').value || 'none'}, Trading:{testing:$('cfgTesting').value, handle_inbound_trades:$('cfgInbound').value, minimum_value_gain:$('cfgMinGain').value, maximum_item_value:$('cfgMaxItem').value, minimum_time_between_trades:$('cfgCooldown').value, minimum_volume:$('cfgVolume').value, upgrade_maximum_value_loss_percent:$('cfgUpgLoss').value, downgrade_minimum_value_gain_percent:$('cfgDgGain').value, auto_counter_dynamic_faces:$('cfgFaceCounter').value}, Runtime:{trade_cycle:$('cfgCycle').value}}; try{ await api('/api/config',{method:'POST', body:JSON.stringify(body)}); $('setup').classList.remove('open'); toast('Settings saved locally.'); refresh(); }catch(e){ toast(e.message); } }
+async function saveSetup(){ const body={General:{roblosecurity:$('cfgRoblo').value, authenticator_code:$('cfgAuth').value, roli_verification:$('cfgRoli').value, webhook_url:$('cfgWebhook').value || 'none'}, Trading:{testing:$('cfgTesting').value, handle_inbound_trades:$('cfgInbound').value, minimum_value_gain:$('cfgMinGain').value, maximum_item_value:$('cfgMaxItem').value, minimum_time_between_trades:$('cfgCooldown').value, minimum_volume:$('cfgVolume').value}}; try{ await api('/api/config',{method:'POST', body:JSON.stringify(body)}); $('setup').classList.remove('open'); toast('Settings saved locally.'); refresh(); }catch(e){ toast(e.message); } }
 async function postAd(){ const tags=[...$('adTags').selectedOptions].map(o=>o.value); const body={player_id:$('adPlayerId').value, offer_item_ids:$('adOffer').value, request_item_ids:$('adRequest').value, request_tags:tags}; try{ const data=await api('/api/trade-ad',{method:'POST', body:JSON.stringify(body)}); toast(data.message); }catch(e){ toast(e.message); } }
 for(const tag of Object.keys(%TAGS%)){ const opt=document.createElement('option'); opt.value=tag; opt.textContent=tag; $('adTags').appendChild(opt); }
 $('startBtn').onclick=()=>api('/api/bot/start',{method:'POST'}).then(d=>{toast(d.message);refresh();}).catch(e=>toast(e.message));
@@ -208,7 +201,6 @@ def load_config() -> configparser.ConfigParser:
 
 def save_config(updates: dict[str, dict[str, str]]) -> None:
     config = load_config()
-    runtime_updates = updates.pop("Runtime", {})
     for section, values in updates.items():
         if section not in config:
             config.add_section(section)
@@ -216,25 +208,13 @@ def save_config(updates: dict[str, dict[str, str]]) -> None:
             config.set(section, key, str(value))
     with CONFIG_PATH.open("w") as file:
         config.write(file)
-    if "trade_cycle" in runtime_updates:
-        TRADE_CYCLE_PATH.write_text(str(runtime_updates["trade_cycle"]).upper() + "\n")
 
 
 def public_config(config: configparser.ConfigParser) -> dict[str, dict[str, str]]:
     data = {section: dict(config[section]) for section in config.sections()}
     for section, key in [("General", "roblosecurity"), ("General", "authenticator_code"), ("General", "roli_verification")]:
         data.setdefault(section, {})[key] = config.get(section, key, fallback="")
-    data["Runtime"] = {"trade_cycle": load_trade_cycle()}
     return data
-
-
-def load_trade_cycle() -> str:
-    if not TRADE_CYCLE_PATH.exists():
-        TRADE_CYCLE_PATH.write_text("UPG\n")
-    cycle = TRADE_CYCLE_PATH.read_text().strip().upper()
-    if cycle not in ("UPG", "DG"):
-        cycle = "UPG"
-    return cycle
 
 
 def setup_complete(config: configparser.ConfigParser) -> bool:
