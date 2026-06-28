@@ -3,6 +3,7 @@ import itertools
 import json
 import logging
 import math
+import os
 import random
 import re
 import threading
@@ -24,6 +25,41 @@ from authenticator import AuthHandler
 safeItems = []
 
 tradeSendQueue = []
+FACES_PATH = "faces.txt"
+TRADE_CYCLE_PATH = "trade_cycle.txt"
+
+
+def load_dynamic_faces():
+    try:
+        with open(FACES_PATH, "r") as faces_file:
+            raw_faces = faces_file.read()
+    except IOError:
+        with open(FACES_PATH, "w") as faces_file:
+            faces_file.write("")
+        raw_faces = ""
+
+    return {
+        face.strip().lower()
+        for face in raw_faces.replace("\n", ",").split(",")
+        if face.strip()
+    }
+
+
+def get_current_trade_cycle():
+    if not os.path.exists(TRADE_CYCLE_PATH):
+        with open(TRADE_CYCLE_PATH, "w") as cycle_file:
+            cycle_file.write("UPG\n")
+
+    with open(TRADE_CYCLE_PATH, "r") as cycle_file:
+        cycle = cycle_file.read().strip().upper()
+
+    if cycle not in ("UPG", "DG"):
+        cycle = "UPG"
+
+    return cycle
+
+
+dynamicFaces = load_dynamic_faces()
 
 try:
     with open("safeitems", "r") as safe_items_file:
@@ -209,18 +245,44 @@ def add_extra_info(item):
     item_data = valuemanager.get_value(item)
 
     if item_data is None:
-        return None
+        log(
+            "Value lookup failed for %s; using minimum value floor."
+            % item.get("Name", item.get("name", item.get("itemId", "unknown"))),
+            mycolors.WARNING,
+        )
+        item_data = {
+            "value": 1,
+            "volume": float(settings["Trading"]["minimum_volume"]),
+            "age": float(settings["Trading"]["minimum_item_age"]),
+        }
 
-    item["value"] = item_data["value"]
+    item["AveragePrice"] = max(1, int(item.get("AveragePrice", 0)))
+    item["value"] = max(1, item_data["value"])
     item["OriginalVolume"] = item_data["volume"]
 
     try:
         item["volume"] = calculate_volume(item["value"], item_data["volume"])
     except ZeroDivisionError:
         item["volume"] = 0
-    item["age"] = item_data["age"]
+    item["volume"] = max(item["volume"], float(settings["Trading"]["minimum_volume"]))
+    item["age"] = max(item_data["age"], float(settings["Trading"]["minimum_item_age"]))
 
     return item
+
+
+def is_dynamic_face_item(item):
+    global dynamicFaces
+    dynamicFaces = load_dynamic_faces()
+    if not dynamicFaces:
+        return False
+
+    item_id = str(item.get("itemId", "")).lower()
+    item_name = item.get("name") or item.get("Name") or ""
+    if isinstance(item_name, bytes):
+        item_name = item_name.decode("utf-8", errors="ignore")
+    item_name = str(item_name).lower()
+
+    return item_id in dynamicFaces or item_name in dynamicFaces
 
 
 class FailedToLoadInventoryException(Exception):
@@ -231,8 +293,19 @@ class AllSelfItemsHoldException(Exception):
     pass
 
 
+def get_recent_average_price(item):
+    """
+    Extract RAP from either the older inventory shape or the current tradable
+    items API shape without generating a full value.
+    """
+    try:
+        return int(item["recentAveragePrice"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 @cached(cache=TTLCache(maxsize=4096, ttl=300))
-def get_inventory(user_id):
+def get_inventory(user_id, max_recent_average_price=None):
     user_id = int(user_id)
     inventory_raw = []
 
@@ -284,6 +357,21 @@ def get_inventory(user_id):
         except Exception:
             log("Failed to items from inventory response", mycolors.FAIL)
             raise FailedToLoadInventoryException
+
+    if max_recent_average_price is not None:
+        inventory_before_filter = len(inventory_raw)
+        inventory_raw = [
+            item
+            for item in inventory_raw
+            if (get_recent_average_price(item) or 0) <= max_recent_average_price
+        ]
+        skipped_items = inventory_before_filter - len(inventory_raw)
+        if skipped_items > 0:
+            log(
+                "Skipped valuing %i items above RAP scan limit %i for user %i."
+                % (skipped_items, max_recent_average_price, user_id),
+                mycolors.WARNING,
+            )
 
     inventory = []
     for item in inventory_raw:
@@ -722,9 +810,11 @@ def listen_for_inbound_trades():
                 if participant_a_user_id == session_user_id:
                     my_offer = copy.deepcopy(trade_data["participantAOffer"])
                     their_offer = copy.deepcopy(trade_data["participantBOffer"])
+                    their_user_id = int(participant_b_user_id)
                 elif participant_b_user_id == session_user_id:
                     my_offer = copy.deepcopy(trade_data["participantBOffer"])
                     their_offer = copy.deepcopy(trade_data["participantAOffer"])
+                    their_user_id = int(participant_a_user_id)
                 else:
                     log(
                         "couldn't find my user_id in trade information for inbound trade. check logs for details...",
@@ -759,6 +849,7 @@ def listen_for_inbound_trades():
                 max_item_value = int(settings["Trading"]["maximum_item_value"])
 
                 their_filtered_items = []
+                dynamic_face_offered = False
                 for item in their_items:
                     include = True
                     reason = ""
@@ -797,6 +888,11 @@ def listen_for_inbound_trades():
                     if item["itemId"] in do_not_trade_for:
                         include = False
                         reason = "Item is marked as do not trade for."
+
+                    if is_dynamic_face_item(item):
+                        include = False
+                        dynamic_face_offered = True
+                        reason = "Item is listed in faces.txt."
 
                     if not include:
                         log("Excluding item %s because: %s" % (item["Name"], reason))
@@ -854,6 +950,23 @@ def listen_for_inbound_trades():
                 if settings["Trading"]["apply_minimum_rap_to_inbound"] == "false":
                     minimum_rap_gain = None
 
+                maximum_inbound_rap_loss_setting = settings["Trading"][
+                    "maximum_inbound_rap_loss"
+                ]
+                if maximum_inbound_rap_loss_setting != "none":
+                    try:
+                        maximum_inbound_rap_loss = float(
+                            maximum_inbound_rap_loss_setting
+                        )
+                    except (TypeError, ValueError):
+                        log(
+                            "Invalid maximum_inbound_rap_loss setting; allowing no inbound RAP loss.",
+                            mycolors.WARNING,
+                        )
+                        maximum_inbound_rap_loss = 0
+                else:
+                    maximum_inbound_rap_loss = None
+
                 if minimum_value_gain is not None:
                     if 1 > minimum_value_gain >= 0:
                         their_value_requirement = my_total * (1 + minimum_value_gain)
@@ -900,6 +1013,20 @@ def listen_for_inbound_trades():
                 else:
                     meets_rap_requirement = True
 
+                meets_inbound_rap_loss_requirement = True
+                if maximum_inbound_rap_loss is not None:
+                    if 1 > maximum_inbound_rap_loss >= 0:
+                        minimum_allowed_inbound_rap = my_total_rap * (
+                            1 - maximum_inbound_rap_loss
+                        )
+                    else:
+                        minimum_allowed_inbound_rap = (
+                            my_total_rap - maximum_inbound_rap_loss
+                        )
+                    meets_inbound_rap_loss_requirement = (
+                        their_total_rap >= minimum_allowed_inbound_rap
+                    )
+
                 if (
                     max(my_total_rap, their_total_rap, my_total, their_total)
                     > max_handle_value
@@ -928,9 +1055,16 @@ def listen_for_inbound_trades():
                 if not meets_volume_slippage_allowance:
                     log("Trade fails to meet maximum volume slippage allowance.")
 
+                if not meets_inbound_rap_loss_requirement:
+                    log(
+                        "Trade fails inbound RAP loss safety: giving %i RAP for %i RAP."
+                        % (my_total_rap, their_total_rap)
+                    )
+
                 if (
                     meets_value_requirement
                     and meets_rap_requirement
+                    and meets_inbound_rap_loss_requirement
                     and my_robux == 0
                     and not contains_bad_item
                     and meets_volume_slippage_allowance
@@ -962,10 +1096,16 @@ def listen_for_inbound_trades():
                     for item in their_items:
                         their_side_nice_data.append(item["Name"])
                     their_side_nice = str(their_side_nice_data)
+                    decline_action = (
+                        "Would decline"
+                        if settings["Debugging"]["easy_debug"] != "false" or testing
+                        else "Declining"
+                    )
 
                     log(
-                        "Declining trade: %s (%i)[%i]\tfor %s (%i)[%i]..."
+                        "%s trade: %s (%i)[%i]\tfor %s (%i)[%i]..."
                         % (
+                            decline_action,
                             my_side_nice,
                             my_total,
                             my_total_rap,
@@ -974,7 +1114,7 @@ def listen_for_inbound_trades():
                             their_total_rap,
                         ),
                         mycolors.OKBLUE,
-                        post_to_webhook=True,
+                        post_to_webhook=not testing,
                     )
                     if settings["Debugging"]["easy_debug"] == "false" and not testing:
                         session.post(
@@ -982,6 +1122,15 @@ def listen_for_inbound_trades():
                             % int(tradeInfo["id"]),
                             headers={"X-CSRF-TOKEN": get_xsrf()},
                         )
+                    if (
+                        dynamic_face_offered
+                        and settings["Trading"]["auto_counter_dynamic_faces"] == "true"
+                    ):
+                        log(
+                            "Dynamic face/head found in inbound trade; searching for a counter offer.",
+                            mycolors.WARNING,
+                        )
+                        search_for_trades(their_user_id, guarantee_trade=True)
 
             # Sort good trades based on score
             good_trades.sort(key=lambda x: -x[0][0])
@@ -989,10 +1138,16 @@ def listen_for_inbound_trades():
             for trade in good_trades:
                 offer_nice = trade_side_to_str(trade[1])
                 ask_nice = trade_side_to_str(trade[2])
+                accept_action = (
+                    "Would accept"
+                    if settings["Debugging"]["easy_debug"] != "false" or testing
+                    else "Accepting"
+                )
 
                 log(
-                    "Accepting trade: %s (%i)[%i]\tfor %s (%i)[%i]..."
+                    "%s trade: %s (%i)[%i]\tfor %s (%i)[%i]..."
                     % (
+                        accept_action,
                         offer_nice,
                         trade[0][1],
                         trade[0][3],
@@ -1001,14 +1156,15 @@ def listen_for_inbound_trades():
                         trade[0][4],
                     ),
                     mycolors.OKGREEN,
-                    post_to_webhook=True,
+                    post_to_webhook=not testing,
                 )
 
-                session.post(
-                    "https://trades.roblox.com/v1/trades/%i/accept"
-                    % int(trade[3]["id"]),
-                    headers={"X-CSRF-TOKEN": get_xsrf()},
-                )
+                if settings["Debugging"]["easy_debug"] == "false" and not testing:
+                    session.post(
+                        "https://trades.roblox.com/v1/trades/%i/accept"
+                        % int(trade[3]["id"]),
+                        headers={"X-CSRF-TOKEN": get_xsrf()},
+                    )
         except Exception:
             logging.exception("Caught exception in inbound trading loop.")
             log(
@@ -1238,8 +1394,33 @@ def search_for_trades(user_id, guarantee_trade=False):
         time.sleep(10)
         logging.exception("Caught exception while getting my_inventory")
         return
+
+    def partner_rap_scan_limit(inventory):
+        multiplier = settings["Trading"].get("partner_rap_scan_limit_multiplier", "none")
+        if multiplier == "none":
+            return None
+
+        try:
+            multiplier = float(multiplier)
+        except (TypeError, ValueError):
+            log(
+                "Invalid partner_rap_scan_limit_multiplier setting; disabling partner RAP pre-filter.",
+                mycolors.WARNING,
+            )
+            return None
+
+        if multiplier <= 0:
+            return None
+
+        tradable_account_rap = sum(item["AveragePrice"] for item in inventory)
+        if tradable_account_rap <= 0:
+            return None
+
+        return int(tradable_account_rap * multiplier)
+
+    their_rap_scan_limit = partner_rap_scan_limit(my_inventory)
     try:
-        their_inventory = get_inventory(user_id)
+        their_inventory = get_inventory(user_id, their_rap_scan_limit)
     except FailedToLoadInventoryException:
         log(
             f"Skipping getting inventory for user {user_id}...",
@@ -1289,6 +1470,7 @@ def search_for_trades(user_id, guarantee_trade=False):
         for item in their_inventory
         if item["itemId"] not in safeItems
         and item["itemId"] not in do_not_trade_for
+        and not is_dynamic_face_item(item)
         and item["age"] >= float(settings["Trading"]["minimum_item_age"])
     ]
 
@@ -1374,6 +1556,14 @@ def search_for_trades(user_id, guarantee_trade=False):
 
     combinations = prod(my_combos, their_combos_wrapper)
 
+    current_trade_cycle = get_current_trade_cycle()
+    upgrade_maximum_value_loss_percent = float(
+        settings["Trading"]["upgrade_maximum_value_loss_percent"]
+    )
+    downgrade_minimum_value_gain_percent = float(
+        settings["Trading"]["downgrade_minimum_value_gain_percent"]
+    )
+
     good_combinations = []
     for i, indexCombo in enumerate(combinations):
         if i % 128 == 0 and time.time() > deadline:
@@ -1393,7 +1583,21 @@ def search_for_trades(user_id, guarantee_trade=False):
         their_total_rap = float(sum([item["AveragePrice"] for item in ask]))
 
         # Check meets minimum value requirement
-        if minimum_value_gain is None:
+        if current_trade_cycle == "UPG":
+            if my_num <= their_num:
+                continue
+            their_value_requirement = my_total * (
+                1.0 - upgrade_maximum_value_loss_percent
+            )
+            meets_value_requirement = their_total >= their_value_requirement
+        elif current_trade_cycle == "DG":
+            if their_num <= my_num:
+                continue
+            their_value_requirement = my_total * (
+                1.0 + downgrade_minimum_value_gain_percent
+            )
+            meets_value_requirement = their_total >= their_value_requirement
+        elif minimum_value_gain is None:
             meets_value_requirement = True
         else:
             if 1.0 > minimum_value_gain >= 0.0:
@@ -1473,7 +1677,11 @@ def search_for_trades(user_id, guarantee_trade=False):
 
         meets_minimum_trade_value_requirement = trade_total_value >= minimum_trade_value
 
-        if settings["Trading"]["safety"] != "false" and my_total >= their_total:
+        if (
+            current_trade_cycle != "UPG"
+            and settings["Trading"]["safety"] != "false"
+            and my_total >= their_total
+        ):
             meets_value_requirement = False
 
         if (
